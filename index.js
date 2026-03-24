@@ -35,13 +35,16 @@ async function run() {
             }
 
             const result = await pacels.find(query).toArray();
-            res.status(200).json(result);
+            res.status(200).json({result,
+                message: "Pacels retrieved successfully",
+            });
         })
 
 
         app.post('/parcels', async (req, res) => {
 
             const pacel = req.body;
+            pacel.createdAt = new Date().toLocaleString();
             const result = await pacels.insertOne(pacel);
 
             res.status(201).json({
