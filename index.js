@@ -3,7 +3,7 @@ const app = express()
 const cors = require('cors');
 require('dotenv').config()
 const port = process.env.PORT || 3000
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 // middleware
 app.use(express.json())
@@ -35,11 +35,16 @@ async function run() {
             }
 
             const result = await pacels.find(query).toArray();
-            res.status(200).json({result,
-                message: "Pacels retrieved successfully",
-            });
+            res.status(200).json(result);
         })
 
+
+        app.get('/parcels/:id', async (req, res) => {
+            const {id} = req.params;
+            const query = {_id: new ObjectId(id)};
+            const result = await pacels.findOne(query);
+            res.status(200).json(result);
+        })
 
         app.post('/parcels', async (req, res) => {
 
@@ -54,6 +59,14 @@ async function run() {
             });
 
         })
+
+        app.delete('/parcels/:id', async (req, res) => {
+            const {id} = req.params;
+            const query = {_id: new ObjectId(id)};
+            const result = await pacels.deleteOne(query);
+            res.status(200).json(result);
+        })
+
 
 
 
