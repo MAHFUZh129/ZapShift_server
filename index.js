@@ -21,14 +21,21 @@ const client = new MongoClient(uri, {
         deprecationErrors: true,
     }
 });
+
+// generate trackingId
+const generateTrackingId = () => {
+    return 'ZAP-SHIFT-' + Math.random().toString(36).substr(2, 9).toUpperCase();
+};
+
 async function run() {
     try {
         // Connect the client to the server	(optional starting in v4.7)
         await client.connect();
         const db = client.db('zap_shift_db');
-        const pacels = db.collection('pacels');
+        const parcels = db.collection('parcels');
+        const payments = db.collection('payments');
 
-        // Pacels API
+        // parcels API
         app.get('/parcels', async (req, res) => {
             const query = {};
 
@@ -37,7 +44,7 @@ async function run() {
                 query.senderEmail = email;
             }
 
-            const result = await pacels.find(query).toArray();
+            const result = await parcels.find(query).toArray();
             res.status(200).json(result);
         })
 
@@ -45,7 +52,7 @@ async function run() {
         app.get('/parcels/:id', async (req, res) => {
             const { id } = req.params;
             const query = { _id: new ObjectId(id) };
-            const result = await pacels.findOne(query);
+            const result = await parcels.findOne(query);
             res.status(200).json(result);
         })
 
@@ -53,7 +60,7 @@ async function run() {
 
             const pacel = req.body;
             pacel.createdAt = new Date().toLocaleString();
-            const result = await pacels.insertOne(pacel);
+            const result = await parcels.insertOne(pacel);
 
             res.status(201).json({
                 result,
@@ -66,7 +73,7 @@ async function run() {
         app.delete('/parcels/:id', async (req, res) => {
             const { id } = req.params;
             const query = { _id: new ObjectId(id) };
-            const result = await pacels.deleteOne(query);
+            const result = await parcels.deleteOne(query);
             res.status(200).json(result);
         })
 
@@ -83,30 +90,85 @@ async function run() {
                         // Provide the exact Price ID (for example, price_1234) of the product you want to sell
                         // price: '{{PRICE_ID}}',
                         quantity: 1,
-                        price_data:{
-                            currency:'USD',
-                            unit_amount:amount ,
-                            product_data:{
-                                name:paymentInfo.parcelName
+                        price_data: {
+                            currency: 'USD',
+                            unit_amount: amount,
+                            product_data: {
+                                name: paymentInfo.parcelName
                             }
                         }
                     },
                 ],
                 mode: 'payment',
-                customer_email:paymentInfo.senderEmail,
-                metadata:{
-                    parcelId:paymentInfo.parcelId
+                customer_email: paymentInfo.senderEmail,
+                metadata: {
+                    parcelId: paymentInfo.parcelId,
+                    parcelName: paymentInfo.parcelName,
+                    // trackingId: trackingId
                 },
-                success_url: `${process.env.CLIENT_DOMAIN}/dashboard/payment-success`,
+                success_url: `${process.env.CLIENT_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+
                 cancel_url: `${process.env.CLIENT_DOMAIN}/dashboard/payment-cancelled`
             });
 
             // console.log(session)
-            res.send({url:session.url})
+            res.send({ url: session.url })
 
         })
 
 
+        app.patch('/session-status', async (req, res) => {
+
+            const { session_id } = req.query
+
+            const session = await stripe.checkout.sessions.retrieve(session_id)
+
+            const trackingId = generateTrackingId()
+            
+            if (session.payment_status === 'paid') {
+
+                const parcelId = session.metadata.parcelId
+                const query = { _id: new ObjectId(parcelId) }
+
+                const updatedDoc = {
+                    $set: {
+                        paymentStatus: 'paid',
+                        trackingId:trackingId
+                    }
+                }
+
+                const result = await parcels.updateOne(query, updatedDoc)
+
+                if (session.payment_status === 'paid') {
+                    const paymentInfo = {
+                        amount: session.amount_total / 100,
+                        currency: session.currency,
+                        customerEmail: session.customer_email,
+                        parcelId: session.metadata.parcelId,
+                        parcelName: session.metadata.parcelName,
+                        transactionId: session.payment_intent,
+                        paymentStatus: session.payment_status,
+                        trackingId: trackingId
+                    }
+
+                    const resultPayments = await payments.insertOne(paymentInfo)
+
+                    res.send({resultPayments,
+                        result,
+                        transactionId: session.payment_intent,
+                        trackingId:trackingId})
+
+                }
+
+                // res.send(result)
+
+                // console.log(parcelId)
+
+            }
+
+            res.send({ success: false })
+
+        });
 
         // Send a ping to confirm a successful connection
         await client.db("admin").command({ ping: 1 });
